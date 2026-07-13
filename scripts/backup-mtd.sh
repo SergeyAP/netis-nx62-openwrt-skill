@@ -50,8 +50,11 @@ while read -r dev _ _ name; do
   name="$(printf '%s' "$name" | tr -d '"')"
   out="$DIR/${dev}_${name}.bin"
   echo "-> $dev ($name)"
-  rmd5="$(ssh "${SSHOPT[@]}" "$HOST" "md5sum /dev/$dev" 2>/dev/null | awk '{print $1}')"
-  ssh "${SSHOPT[@]}" "$HOST" "cat /dev/$dev" > "$out" 2>/dev/null
+  # NOTE: </dev/null on both ssh calls is REQUIRED. This loop reads its stdin
+  # from proc_mtd.txt (see `done < ...` below); without </dev/null each ssh
+  # would consume that list as its own stdin, so only mtd0 gets backed up.
+  rmd5="$(ssh "${SSHOPT[@]}" "$HOST" "md5sum /dev/$dev" </dev/null 2>/dev/null | awk '{print $1}')"
+  ssh "${SSHOPT[@]}" "$HOST" "cat /dev/$dev" </dev/null > "$out" 2>/dev/null
   lmd5="$(host_md5 "$out")"
   size="$(host_size "$out")"
   if [ -n "$rmd5" ] && [ "$rmd5" = "$lmd5" ]; then
