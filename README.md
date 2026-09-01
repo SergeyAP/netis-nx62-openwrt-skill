@@ -1,23 +1,39 @@
-# netis-nx62-openwrt-flash
+# openwrt-router-skills
 
-A safety-gated, cross-platform guide for flashing a **Netis NX62** (the hardware
-twin of the **Netcore N60 Pro**, MediaTek **MT7986A / Filogic**, OpenWrt id
-`netcore_n60-pro`) from stock firmware to **OpenWrt**, via the U-Boot **TFTP
-recovery** path.
+Field-tested [Claude](https://claude.com/claude-code) **skills** — and equally
+usable plain guides — for the **Netis NX62** / **Netcore N60 Pro** (MediaTek
+**MT7986A / Filogic**, OpenWrt id `netcore_n60-pro`) and, beyond the flashing
+one, for OpenWrt routers generally.
 
-It ships as a [Claude](https://claude.com/claude-code) **skill** — so Claude can
-walk you through the flash one careful step at a time — but the same files are
-also a perfectly good **human-readable guide**. Start with
-[`GUIDE.md`](GUIDE.md) for the checklist, or [`SKILL.md`](SKILL.md) for the full
-explained procedure.
+| Skill | What it does |
+|---|---|
+| [`netis-nx62-openwrt-flash`](skills/netis-nx62-openwrt-flash/) | Stock firmware → OpenWrt via U-Boot TFTP recovery, checksum-gated at every write |
+| [`openwrt-monitoring`](skills/openwrt-monitoring/) | Router metrics into an existing Grafana, plus remote access from behind NAT |
+| [`openwrt-torrent`](skills/openwrt-torrent/) | Transmission on USB storage — including vetting the drive before trusting it |
 
-> ⚠️ **Flashing can brick your router.** Writing to NAND (`mtd write`,
-> `ubiformat`, `sysupgrade`) is risky. This guide verifies every image checksum,
-> backs up all flash partitions first, and gates the one irreversible step
-> behind a live packet-capture check — but you use it **at your own risk**. There
-> is **no warranty**. If you are not comfortable, stop and find help.
+Each folder holds a `SKILL.md` (the full procedure), a `GUIDE.md` (checklist),
+plus `references/` and `scripts/`.
 
-## What makes this different
+## Install
+
+- **Import a package:** open the `.skill` file inside a skill's folder in
+  Claude and click *Save skill*, **or**
+- **Manual:** copy a skill's folder to `~/.claude/skills/<name>/`.
+
+Then describe what you want — *"I have a Netis NX62 and want OpenWrt on it"*,
+*"get my OpenWrt router into Grafana"*, *"set up torrents on my router"* — and
+the matching skill triggers.
+
+## Use them as plain guides
+
+No Claude needed. Read the `GUIDE.md` in a skill's folder, then its `SKILL.md`.
+
+> ⚠️ **Flashing can brick your router.** The flashing skill writes to NAND
+> (`mtd write`, `ubiformat`, `sysupgrade`). It verifies every checksum, backs up
+> all partitions first and gates the irreversible step behind a packet capture —
+> but you use it **at your own risk**, with **no warranty**.
+
+## Flashing — what makes it different
 
 Real, field-tested lessons that trip people up (verified end-to-end on macOS):
 
