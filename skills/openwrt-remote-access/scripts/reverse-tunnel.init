@@ -1,0 +1,41 @@
+#!/bin/sh /etc/rc.common
+# Reverse SSH tunnel from an OpenWrt router to a host with a public address.
+# Install as /etc/init.d/reverse-tunnel, then: enable && start
+#
+# Uses dropbear's own dbclient rather than autossh: autossh -M 0 relies on
+# ServerAliveInterval anyway, and procd already restarts what it supervises.
+# That saves ~450 KB (autossh pulls in openssh-client) and one moving part.
+#
+# What it does NOT buy you is OpenSSH's ExitOnForwardFailure — dropbear has no
+# equivalent, so a refused forward leaves a live process with a dead tunnel.
+# Pair this service with scripts/tunnel-watchdog.sh, or use autossh instead.
+#
+# HOME=/root is REQUIRED. procd starts services without it, and without HOME
+# dbclient cannot find ~/.ssh/known_hosts — it then rejects the host key
+# ("Host ... is not in the trusted hosts file") and dies in a restart loop.
+
+USE_PROCD=1
+START=95
+STOP=10
+
+HOST=vps.example.com      # <VPS>
+USER=root
+KEY=/etc/dropbear/id_tunnel
+RPORT=2221                # port on <VPS>, bound to its loopback only
+
+start_service() {
+	[ -f "$KEY" ] || { logger -t reverse-tunnel "missing key $KEY"; return 1; }
+	[ -f /root/.ssh/known_hosts ] || {
+		logger -t reverse-tunnel "missing /root/.ssh/known_hosts"; return 1; }
+	procd_open_instance
+	procd_set_param env HOME=/root
+	procd_set_param command /usr/bin/dbclient \
+		-K 30 \
+		-I 0 \
+		-i "$KEY" \
+		-N -R ${RPORT}:localhost:22 \
+		${USER}@${HOST}
+	procd_set_param respawn 3600 15 0
+	procd_set_param stderr 1
+	procd_close_instance
+}

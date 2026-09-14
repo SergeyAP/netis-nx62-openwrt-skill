@@ -6,9 +6,22 @@
 TFTP recovery isn't succeeding, so it resets and retries. Diagnose by capturing
 traffic *from the router* (see the host reference for your OS):
 
-- **You see NO TFTP request from the router** → U-Boot's recovery is bound to a
-  **specific LAN port**. Move the Ethernet cable to another LAN port. On this
-  board **LAN4 works when LAN1 does not**. Re-watch the capture.
+- **You see NO TFTP request from the router** → the cable is in a port U-Boot
+  cannot use. On this board the switch is wired like this:
+
+  ```
+  eth0 ── MT7531 switch ── lan1 → external PHY Maxlinear GPY211C (2.5G)  ← U-Boot: no driver
+                        ├─ lan2 → internal PHY MT7531 (1G)               ← works
+                        ├─ lan3 → internal PHY MT7531 (1G)               ← works
+                        └─ lan4 → internal PHY MT7531 (1G)               ← works
+  eth1 ── WAN ── external PHY GPY211C (2.5G)                             ← never use
+  ```
+
+  U-Boot drives only the switch's internal PHYs, so LAN1 brings the link up with
+  no network stack behind it — exactly the flapping-with-no-TFTP symptom. Move
+  the cable to **LAN2, LAN3 or LAN4** (any of the three) and re-watch the
+  capture. This is deterministic, not luck: it is not worth trying ports at
+  random.
 - **You see the TFTP request but the transfer stalls** (router re-sends the same
   4-byte ACK repeatedly, then resets) → the TFTP server isn't delivering data.
   Check: firewall allows UDP/69; server honors `blksize 1468`; the file is
