@@ -5,14 +5,46 @@ usable plain guides — for the **Netis NX62** / **Netcore N60 Pro** (MediaTek
 **MT7986A / Filogic**, OpenWrt id `netcore_n60-pro`) and, beyond the flashing
 one, for OpenWrt routers generally.
 
-| Skill | What it does |
-|---|---|
-| [`netis-nx62-openwrt-flash`](skills/netis-nx62-openwrt-flash/) | Stock firmware → OpenWrt via U-Boot TFTP recovery, checksum-gated at every write |
-| [`openwrt-monitoring`](skills/openwrt-monitoring/) | Router metrics into an existing Grafana, plus remote access from behind NAT |
-| [`openwrt-torrent`](skills/openwrt-torrent/) | Transmission on USB storage — including vetting the drive before trusting it |
+Everything here was written after doing it on real hardware, so the parts that
+usually cost an evening — a bootloader that only talks on certain ports, a
+tunnel that looks alive while being dead, a dashboard that draws nothing — are
+the parts these documents spend their words on.
 
-Each folder holds a `SKILL.md` (the full procedure), a `GUIDE.md` (checklist),
-plus `references/` and `scripts/`.
+## One base skill, four optional add-ons
+
+The flashing skill is the base: it turns a stock router into a blank OpenWrt.
+The other four are **independent add-ons** — pick what you need, in any
+combination. None of them requires the flashing skill, and each works on any
+OpenWrt router, not only this board.
+
+```
+                       netis-nx62-openwrt-flash
+                        stock firmware → OpenWrt
+                                  │
+        ┌─────────────────┬───────┴───────┬──────────────────┐
+        ▼                 ▼               ▼                  ▼
+ openwrt-remote-access  openwrt-vpn-client  openwrt-monitoring  openwrt-torrent
+ reach it from away     tunnel + kill switch  metrics in Grafana   USB + Transmission
+        1.                    2.                    3.                  4.
+```
+
+| Skill | What it does | Add it when |
+|---|---|---|
+| [`netis-nx62-openwrt-flash`](skills/netis-nx62-openwrt-flash/) | Stock firmware → OpenWrt via U-Boot TFTP recovery, checksum-gated at every write | you have the box and want OpenWrt on it |
+| [`openwrt-remote-access`](skills/openwrt-remote-access/) | Two independent ways in from behind NAT: a WireGuard spoke and a reverse SSH tunnel, with the watchdog for the failure that survives procd | the router lives somewhere you are not |
+| [`openwrt-vpn-client`](skills/openwrt-vpn-client/) | The whole network through WireGuard/AmneziaWG: policy routing as a kill switch, endpoint pinning, DNS, automatic failover | everyone behind the router should exit through a tunnel |
+| [`openwrt-monitoring`](skills/openwrt-monitoring/) | Router metrics into an existing Grafana — exporter choice with measured footprints, and why community dashboards render blank | you already run Prometheus/VictoriaMetrics |
+| [`openwrt-torrent`](skills/openwrt-torrent/) | Transmission on USB storage, including vetting the drive before trusting it | the router should also download things |
+
+**Suggested order: remote access → VPN → monitoring → torrents.** Access first,
+because every later change can lock you out of a box you cannot reach; monitoring
+after the VPN, because the tunnel's handshake age is the metric worth alerting
+on; storage last. Install one at a time — a problem then has exactly one
+candidate cause.
+
+Each skill folder holds a `SKILL.md` (the full procedure), a `GUIDE.md`
+(checklist), plus `references/` and `scripts/` where they apply, and a packaged
+`.skill` file.
 
 ## Install
 
@@ -21,8 +53,9 @@ plus `references/` and `scripts/`.
 - **Manual:** copy a skill's folder to `~/.claude/skills/<name>/`.
 
 Then describe what you want — *"I have a Netis NX62 and want OpenWrt on it"*,
-*"get my OpenWrt router into Grafana"*, *"set up torrents on my router"* — and
-the matching skill triggers.
+*"route all my traffic through a VPN on the router"*, *"reach my router from
+outside"*, *"get my OpenWrt router into Grafana"*, *"set up torrents on my
+router"* — and the matching skill triggers.
 
 ## Use them as plain guides
 
@@ -40,10 +73,11 @@ Real, field-tested lessons that trip people up (verified end-to-end on macOS):
 - **Keep your internet while flashing** — set the wired NIC to a static
   `192.168.1.254/24` with **no gateway**, so it can never steal your default
   route. Internet stays on Wi-Fi.
-- **The LAN-port gotcha** — after `mtd erase ubi` the link may flap up/down every
-  ~30 s with no TFTP request. On this board U-Boot's recovery TFTP only works on
-  a **specific LAN port** (LAN4 worked when LAN1 didn't). A packet-capture step
-  tells you exactly what's happening instead of guessing.
+- **The LAN-port rule is deterministic, not luck.** U-Boot's recovery TFTP works
+  on **LAN2–LAN4** and never on LAN1: LAN1 and WAN hang off an external Maxlinear
+  GPY211C PHY that U-Boot has no driver for, while LAN2–LAN4 sit on the MT7531
+  switch's internal PHY. The symptom of getting it wrong is a link that flaps
+  every ~30 s with no TFTP request.
 - **Write order that fails safe** — FIP first (reversible), then erase ubi (point
   of no return), then BL2 **last** from a re-triggerable recovery. Every write is
   checksum-verified by reading it back.
@@ -51,32 +85,33 @@ Real, field-tested lessons that trip people up (verified end-to-end on macOS):
   in recovery; the guide reads `/proc/mtd` live instead of assuming.
 - **No secrets** — every `sudo` is interactive; nothing hardcodes a password.
 
+## The add-ons — what makes them different
+
+- **Remote access:** the failure nobody warns you about is not the tunnel
+  dropping, it is `dbclient` surviving a *refused* forward — a live process with
+  a dead tunnel that procd happily leaves alone. The skill ships the watchdog and
+  explains the honest `dbclient` vs `autossh` trade (450 KB against 40 lines).
+- **VPN client:** the kill switch is not a feature you enable, it is the absence
+  of a `lan → wan` forwarding rule plus `suppress_prefixlength 0`. The skill also
+  covers the mistake that makes a tunnel die seconds after coming up — an
+  endpoint that is not pinned to the WAN gateway, so the handshake routes into
+  the tunnel it is establishing.
+- **Monitoring:** measured overlay footprints for eight agents on a 128 MB NAND
+  router, and the five independent reasons a community Grafana board draws
+  nothing — all of which look identical from the outside.
+- **Torrent:** vet the flash drive before configuring anything, mount by UUID,
+  and gate the daemon on the mount so it can never fill the router's own NAND.
+
 ## Contents
 
-| File | What |
-|---|---|
-| [`SKILL.md`](SKILL.md) | Full procedure: bootchain, ordered writes, safety gates |
-| [`GUIDE.md`](GUIDE.md) | Minimum requirements + quick checklist |
-| [`references/host-macos.md`](references/host-macos.md) | macOS host setup (verified) |
-| [`references/host-linux.md`](references/host-linux.md) | Linux host setup |
-| [`references/host-windows.md`](references/host-windows.md) | Windows host setup (tftpd64 / WSL2) |
-| [`references/troubleshooting.md`](references/troubleshooting.md) | Link flap, no TFTP, wrong port, brick paths |
-| [`scripts/backup-mtd.sh`](scripts/backup-mtd.sh) | Stream-and-verify MTD backup (macOS/Linux) |
-| `netis-nx62-openwrt-flash.skill` | Packaged skill for one-click import into Claude |
-
-## Use it as a Claude skill
-
-- **Import the package:** open `netis-nx62-openwrt-flash.skill` in Claude and
-  click *Save skill*, **or**
-- **Manual install:** copy this folder to `~/.claude/skills/netis-nx62-openwrt-flash/`.
-
-Then just tell Claude something like *"I have a Netis NX62 and want to put OpenWrt
-on it from my Mac"* — the skill triggers automatically.
-
-## Use it as a plain guide
-
-You don't need Claude. Read [`GUIDE.md`](GUIDE.md) then [`SKILL.md`](SKILL.md) and
-follow the steps yourself.
+```
+skills/
+├── netis-nx62-openwrt-flash/   SKILL.md GUIDE.md references/ scripts/backup-mtd.sh
+├── openwrt-remote-access/      SKILL.md GUIDE.md scripts/{reverse-tunnel.init,tunnel-watchdog.sh}
+├── openwrt-vpn-client/         SKILL.md GUIDE.md scripts/vpn-failover.sh
+├── openwrt-monitoring/         SKILL.md GUIDE.md references/ scripts/{vmagent.init,check-dashboard.py}
+└── openwrt-torrent/            SKILL.md GUIDE.md references/ scripts/{transmission-guard.sh,usb-bench.sh,usb-capacity-check.sh}
+```
 
 ## Credits
 
