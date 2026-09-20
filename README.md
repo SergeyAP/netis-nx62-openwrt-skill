@@ -45,6 +45,8 @@ Real, field-tested lessons that trip people up (verified end-to-end on macOS):
 | [`references/host-linux.md`](references/host-linux.md) | Linux host setup |
 | [`references/host-windows.md`](references/host-windows.md) | Windows host setup (tftpd64 / WSL2) |
 | [`references/troubleshooting.md`](references/troubleshooting.md) | Link flap, no TFTP, wrong port, brick paths |
+| [`references/choosing-an-amneziawg-implementation.md`](references/choosing-an-amneziawg-implementation.md) | **After the flash:** which AmneziaWG route to take — read your config's generation, what the feed still has, userspace against the kernel module |
+| [`references/building-amneziawg-from-source.md`](references/building-amneziawg-from-source.md) | Building the packages yourself when the feed cannot help, with every rake marked |
 | [`scripts/backup-mtd.sh`](scripts/backup-mtd.sh) | Stream-and-verify MTD backup (macOS/Linux) |
 | `netis-nx62-openwrt-flash.skill` | Packaged skill for one-click import into Claude |
 

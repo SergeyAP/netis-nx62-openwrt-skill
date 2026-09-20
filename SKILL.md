@@ -290,5 +290,10 @@ the road back to stock.
 - `references/host-linux.md` — Linux host setup (`tftpd-hpa`, NetworkManager/ip)
 - `references/host-windows.md` — Windows host setup (tftpd64 / WSL, Wireshark)
 - `references/troubleshooting.md` — link flap, no TFTP, wrong port, brick paths
+- `references/choosing-an-amneziawg-implementation.md` — after the flash: telling which
+  AmneziaWG generation a provider config needs, what the feed still carries, and
+  whether to run the userspace implementation or build the kernel module
+- `references/building-amneziawg-from-source.md` — building those packages yourself,
+  including why the build host decides whether it works at all
 - `scripts/backup-mtd.sh` — stream-and-verify MTD backup (macOS/Linux host)
 - `GUIDE.md` — condensed requirements + quick checklist
