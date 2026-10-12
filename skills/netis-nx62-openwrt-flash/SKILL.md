@@ -217,9 +217,11 @@ Wireshark — see `references/host-<os>.md`):
   followed by a real data transfer; within a minute SSH (port 22) comes up and
   stays up.
 - **Bad (the classic gotcha):** the link flaps up/down roughly **every ~30 s**
-  and you see **no** TFTP request from the router. On this board **U-Boot's
-  recovery TFTP only works on a specific LAN port.** Move the cable to a
-  different LAN port (LAN4 is known to work when LAN1 didn't) and watch again.
+  and you see **no** TFTP request from the router. The cable is in a port U-Boot
+  cannot use: LAN1 and WAN hang off an external Maxlinear GPY211C PHY that
+  U-Boot has no driver for, so the link comes up with nothing behind it. Move
+  the cable to **LAN2, LAN3 or LAN4** — all three sit on the switch's internal
+  PHY and are equivalent — and watch again.
 - Fallback trigger: power off, hold `RESET`, power on, keep holding ~10 s to
   force U-Boot into recovery.
 
@@ -283,6 +285,27 @@ password.
 **First thing after success:** have the user set a `root` password (LuCI → System
 → Administration, or `passwd` over SSH). Keep the stock backup safe off-host as
 the road back to stock.
+
+## Step 7 — Optional: what to put on it now
+
+A freshly flashed router is a blank OpenWrt. The other skills in this repo are
+independent add-ons — offer them, do not assume them, and install them one at a
+time so a problem has one candidate cause:
+
+| Add-on | Skill | Worth it when |
+|---|---|---|
+| Remote access from behind NAT | `openwrt-remote-access` | the router lives somewhere you are not — **do this one first**, it is what makes the rest fixable from a distance |
+| All traffic through a VPN | `openwrt-vpn-client` | the whole household should exit through a tunnel, with a kill switch rather than a leak |
+| Metrics in Grafana | `openwrt-monitoring` | you already run Prometheus/VictoriaMetrics and want this box beside the others |
+| Torrents on USB storage | `openwrt-torrent` | the router is also meant to download things, and the drive deserves vetting first |
+
+Suggested order: **remote access → VPN → monitoring → torrents.** Access first
+because every later step can lock you out; monitoring after the VPN because the
+tunnel's handshake age is the metric worth alerting on; torrents last because
+they are the only one that touches storage.
+
+The add-ons have no dependency on this skill and can be applied to any OpenWrt
+router — the sequencing above is advice, not a requirement.
 
 ## Reference material
 

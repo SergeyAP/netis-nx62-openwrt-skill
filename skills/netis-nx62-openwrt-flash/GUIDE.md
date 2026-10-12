@@ -61,7 +61,21 @@ everything?" summary.
 ## The three things people get wrong
 
 - **Setting a gateway on the wired interface** → they lose internet. Don't set one.
-- **Cable in the wrong LAN port** → U-Boot recovery never TFTPs. Watch the capture;
-  move to LAN4 if the link just flaps.
+- **Cable in the wrong LAN port** → U-Boot recovery never TFTPs. Use **LAN2, LAN3
+  or LAN4**, never LAN1: LAN1 and WAN hang off an external Maxlinear GPY211C PHY
+  that U-Boot cannot drive, while LAN2–LAN4 sit on the switch's internal PHY. The
+  link comes up on LAN1 and nothing happens behind it.
 - **Skipping checksum/capture verification** → flashing a corrupt or wrong image.
   Every write is verified here for a reason; never skip a gate.
+
+## After the flash — optional add-ons
+
+Independent skills in this repo, in the order that keeps you out of trouble:
+
+1. `openwrt-remote-access` — reach the router when it is not in the room.
+2. `openwrt-vpn-client` — route the whole network through a tunnel, with a kill
+   switch instead of a leak.
+3. `openwrt-monitoring` — metrics into an existing Grafana.
+4. `openwrt-torrent` — Transmission on a USB drive that has been vetted first.
+
+Install one at a time; a problem then has exactly one candidate cause.

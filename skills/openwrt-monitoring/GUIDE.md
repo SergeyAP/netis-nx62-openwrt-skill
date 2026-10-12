@@ -32,9 +32,11 @@ uclient-fetch -q -O - http://127.0.0.1:9100/metrics | grep -c '^[a-z]'   # expec
 `/etc/init.d/network restart` (via `setsid`, busybox has no `nohup`) after
 installing the proto package.
 
-**Reverse SSH** — see SKILL.md part 3B and
-[`scripts/reverse-tunnel.init`](scripts/reverse-tunnel.init). The one that
-bites: `procd_set_param env HOME=/root`.
+**Reverse SSH** — see SKILL.md part 3B; the init script and the watchdog live in
+the companion skill
+[`openwrt-remote-access`](../openwrt-remote-access/). The two that bite:
+`procd_set_param env HOME=/root`, and a refused forward that leaves dbclient
+alive with a dead tunnel.
 
 ## Dashboards
 

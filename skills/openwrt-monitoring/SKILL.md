@@ -158,7 +158,11 @@ point a scrape job at `<ROUTER_IP>:9100`.
 
 ## Part 3 — The transport
 
-The router has no public address, so it must dial out.
+The router has no public address, so it must dial out. This part is the short
+version; the **`openwrt-remote-access`** skill in this repo covers the same two
+transports in full — key restriction on the far side, the procd init script, the
+"process alive, forward dead" failure and its watchdog. Use this section to get
+metrics flowing, that one when remote access is the goal in its own right.
 
 ### Option A — WireGuard spoke
 
@@ -224,13 +228,18 @@ On `<VPS>`, restrict the key to forwarding only:
 restrict,port-forwarding,command="/bin/false" ssh-ed25519 AAAA... router-tunnel
 ```
 
-Install [`scripts/reverse-tunnel.init`](scripts/reverse-tunnel.init) as
-`/etc/init.d/reverse-tunnel`, then `enable` and `start`.
+The procd init script lives in the companion skill:
+[`openwrt-remote-access/scripts/reverse-tunnel.init`](../openwrt-remote-access/scripts/reverse-tunnel.init).
+Install it as `/etc/init.d/reverse-tunnel`, then `enable` and `start`.
 
 **`HOME` is not set for procd services.** Without it dbclient cannot find
 `~/.ssh/known_hosts`, rejects the host key with *"Host … is not in the trusted
 hosts file"*, and dies in a restart loop. The init script sets
 `procd_set_param env HOME=/root` — keep it.
+
+**A refused forward does not kill dbclient**, so procd never respawns it and the
+tunnel can stay dead while the process looks healthy. If you rely on this
+transport for metrics, take the watchdog from `openwrt-remote-access` as well.
 
 Client side (`~/.ssh/config`):
 
