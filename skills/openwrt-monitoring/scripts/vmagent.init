@@ -1,0 +1,34 @@
+#!/bin/sh /etc/rc.common
+# vmagent on OpenWrt: scrape the local exporter, remote_write to a central
+# VictoriaMetrics. There is no vmagent package for OpenWrt — place the
+# vmagent-prod binary from the vmutils release by hand and verify its checksum
+# against the one published with that release.
+#
+# The remote_write queue lives in tmpfs on purpose. It is rewritten constantly,
+# and routers have small NAND with a finite write budget. Losing the queue on
+# reboot is an acceptable price for metrics.
+
+USE_PROCD=1
+START=96
+STOP=10
+
+VM_URL=http://10.10.0.1:8428      # <VM_URL>
+VM_USER=metrics-writer       # <VM_USER>
+QUEUE=/tmp/vmagent
+
+start_service() {
+	[ -f /etc/vmagent/scrape.yml ] || { logger -t vmagent "missing scrape.yml"; return 1; }
+	mkdir -p "$QUEUE"
+	procd_open_instance
+	procd_set_param command /usr/local/bin/vmagent-prod \
+		-promscrape.config=/etc/vmagent/scrape.yml \
+		-remoteWrite.url="${VM_URL}/api/v1/write" \
+		-remoteWrite.basicAuth.username="$VM_USER" \
+		-remoteWrite.basicAuth.passwordFile=/etc/vmagent/vm_pass \
+		-remoteWrite.tmpDataPath="$QUEUE" \
+		-httpListenAddr=127.0.0.1:8429 \
+		-loggerLevel=INFO
+	procd_set_param respawn 3600 10 0
+	procd_set_param stderr 1
+	procd_close_instance
+}
