@@ -301,7 +301,10 @@ you need a working tunnel today.
 
 ## Related
 
-- `SKILL.md` — flashing the board in the first place
-- `references/troubleshooting.md` — recovery, ports, brick paths
+- [`choosing-an-amneziawg-implementation.md`](choosing-an-amneziawg-implementation.md)
+  — whether you need to build at all
+- [`../SKILL.md`](../SKILL.md) — putting the tunnel to work once the packages are in
+- `netis-nx62-openwrt-flash` (the base skill) — flashing the board in the first place,
+  and its `references/troubleshooting.md` for recovery, ports and brick paths
 - The operational side of a flash (host preparation, gates, backups) is documented
   per-site; this file is only about producing packages the feed will not give you.

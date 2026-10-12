@@ -296,13 +296,17 @@ time so a problem has one candidate cause:
 |---|---|---|
 | Remote access from behind NAT | `openwrt-remote-access` | the router lives somewhere you are not — **do this one first**, it is what makes the rest fixable from a distance |
 | All traffic through a VPN | `openwrt-vpn-client` | the whole household should exit through a tunnel, with a kill switch rather than a leak |
+| Only blocked services through a VPN | `openwrt-selective-routing` | blocked sites and messengers should go through a tunnel while local services, banks and fast CDNs stay direct — needs the tunnel from `openwrt-vpn-client` first, without its default routing |
 | Metrics in Grafana | `openwrt-monitoring` | you already run Prometheus/VictoriaMetrics and want this box beside the others |
 | Torrents on USB storage | `openwrt-torrent` | the router is also meant to download things, and the drive deserves vetting first |
 
-Suggested order: **remote access → VPN → monitoring → torrents.** Access first
-because every later step can lock you out; monitoring after the VPN because the
-tunnel's handshake age is the metric worth alerting on; torrents last because
-they are the only one that touches storage.
+Suggested order: **remote access → VPN → (selective routing) → monitoring →
+torrents.** Access first because every later step can lock you out; the VPN tunnel
+before selective routing because the latter only decides what goes into a tunnel that
+must already work; monitoring after both because the tunnel's handshake age is the
+metric worth alerting on; torrents last because they are the only one that touches
+storage. Choose **one** of "all traffic" and "only blocked services" for the household
+— they are two routing policies for the same tunnel, not layers.
 
 The add-ons have no dependency on this skill and can be applied to any OpenWrt
 router — the sequencing above is advice, not a requirement.
@@ -313,10 +317,8 @@ router — the sequencing above is advice, not a requirement.
 - `references/host-linux.md` — Linux host setup (`tftpd-hpa`, NetworkManager/ip)
 - `references/host-windows.md` — Windows host setup (tftpd64 / WSL, Wireshark)
 - `references/troubleshooting.md` — link flap, no TFTP, wrong port, brick paths
-- `references/choosing-an-amneziawg-implementation.md` — after the flash: telling which
-  AmneziaWG generation a provider config needs, what the feed still carries, and
-  whether to run the userspace implementation or build the kernel module
-- `references/building-amneziawg-from-source.md` — building those packages yourself,
-  including why the build host decides whether it works at all
+- AmneziaWG packages — which generation a provider config needs, what the feed still
+  carries, prebuilt packages for 25.12, and building them yourself — now live with the
+  skill that uses them: `openwrt-vpn-client/references/`
 - `scripts/backup-mtd.sh` — stream-and-verify MTD backup (macOS/Linux host)
 - `GUIDE.md` — condensed requirements + quick checklist

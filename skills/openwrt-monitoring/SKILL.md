@@ -2,16 +2,17 @@
 name: openwrt-monitoring
 description: >-
   Use this when someone wants to monitor an OpenWrt router from an existing
-  Prometheus/VictoriaMetrics + Grafana stack, and/or reach that router remotely
-  when it sits behind NAT with no public address. Covers choosing an exporter
+  Prometheus/VictoriaMetrics + Grafana stack, including a router that sits behind
+  NAT with no public address. Covers choosing an exporter
   (prometheus-node-exporter-lua vs ucode vs collectd vs netdata, with measured
-  footprints), wiring metrics out over a WireGuard spoke or a reverse SSH
+  footprints), getting metrics out over a WireGuard spoke or a reverse SSH
   tunnel, running vmagent on a device with no package for it, and — the part
   that actually costs people days — getting community Grafana dashboards to
   render instead of showing blank panels. Trigger for: "monitor my OpenWrt
-  router in Grafana", "node_exporter on OpenWrt", "reach my router from
-  outside", "reverse ssh tunnel from a router", "the OpenWrt dashboard is
-  empty", "grafana.com dashboard 11147 shows nothing". Not for setting up the
+  router in Grafana", "node_exporter on OpenWrt", "vmagent on a router", "the
+  router stopped sending metrics", "the OpenWrt dashboard is empty",
+  "grafana.com dashboard 11147 shows nothing". Not for remote shell access as a
+  goal in itself — that is `openwrt-remote-access`. Not for setting up the
   Prometheus/Grafana server itself — this assumes one already exists.
 ---
 
@@ -161,8 +162,14 @@ point a scrape job at `<ROUTER_IP>:9100`.
 The router has no public address, so it must dial out. This part is the short
 version; the **`openwrt-remote-access`** skill in this repo covers the same two
 transports in full — key restriction on the far side, the procd init script, the
-"process alive, forward dead" failure and its watchdog. Use this section to get
+"process alive, forward dead" failure and how to end it. Use this section to get
 metrics flowing, that one when remote access is the goal in its own right.
+
+**If metrics stop on a network that filters VPNs, look at the transport first.** A
+plain WireGuard spoke can be cut by DPI right after its handshake — fresh handshake,
+almost nothing received, every remote_write failing. Routing the hub's endpoint
+through the household's obfuscated tunnel brings it back; `openwrt-remote-access` §6
+shows how.
 
 ### Option A — WireGuard spoke
 
@@ -237,9 +244,10 @@ Install it as `/etc/init.d/reverse-tunnel`, then `enable` and `start`.
 hosts file"*, and dies in a restart loop. The init script sets
 `procd_set_param env HOME=/root` — keep it.
 
-**A refused forward does not kill dbclient**, so procd never respawns it and the
-tunnel can stay dead while the process looks healthy. If you rely on this
-transport for metrics, take the watchdog from `openwrt-remote-access` as well.
+**A refused forward does not kill dbclient by default**, so procd never respawns it
+and the tunnel can stay dead while the process looks healthy. On dropbear 2025.x
+(OpenWrt 25.12) add `-o ExitOnForwardFailure=yes`; on older builds take the watchdog
+from `openwrt-remote-access`.
 
 Client side (`~/.ssh/config`):
 

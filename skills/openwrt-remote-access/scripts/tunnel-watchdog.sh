@@ -1,10 +1,13 @@
 #!/bin/sh
 # tunnel-watchdog: catch the state "process alive, forward dead".
 #
-# dbclient has no equivalent of OpenSSH's ExitOnForwardFailure: when the remote
-# forward is refused it logs the refusal and keeps running as a plain session.
-# procd sees a healthy process and respawns nothing, so the tunnel can stay dead
-# for days while every naive check says it is up.
+# Only needed on a dropbear older than 2025.x. Newer dbclient takes
+# -o ExitOnForwardFailure=yes (reverse-tunnel.init passes it), which ends the
+# client on a refused forward and lets procd restart it — no watchdog required.
+#
+# Without that option, when the remote forward is refused dbclient logs the refusal
+# and keeps running as a plain session. procd sees a healthy process and respawns
+# nothing, so the tunnel can stay dead for days while every naive check says it is up.
 #
 # Run from cron every five minutes:
 #   */5 * * * * /usr/bin/tunnel-watchdog.sh

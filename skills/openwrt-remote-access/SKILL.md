@@ -3,16 +3,20 @@ name: openwrt-remote-access
 description: >-
   Use this when an OpenWrt router has no public address — behind someone else's
   NAT, CGNAT, or a provider that refuses inbound — and must still be reachable
-  for shell and web interfaces. Covers the two transports worth having (a
-  WireGuard spoke to a hub you control, and a reverse SSH tunnel to any host
-  with a public address), dbclient versus autossh with the real trade-off,
-  restricting the key on the far side, the silent "process alive, forward dead"
-  failure that survives procd supervision, and a watchdog for it. Trigger for:
-  "reach my router from outside", "reverse ssh tunnel from a router", "autossh
-  on OpenWrt", "router behind CGNAT", "ssh into my home router", "the tunnel is
-  up but the port is dead", "port forwarding to a router web UI". Not for
-  exposing services to the public internet — everything here stays on loopback
-  and is reached through SSH.
+  for shell and web interfaces. Covers telling CGNAT from a plain NAT, the two
+  transports worth having (a WireGuard spoke to a hub you control, and a reverse
+  SSH tunnel to any host with a public address), dbclient versus autossh with the
+  real trade-off, restricting the key on the far side, the silent "process alive,
+  forward dead" failure and the option that ends it, and — on a router that also
+  runs a VPN — three independent channels: the spoke inside the VPN, one reverse
+  tunnel beside it and one through it. Trigger for: "reach my router from
+  outside", "reverse ssh tunnel from a router", "autossh on OpenWrt", "router
+  behind CGNAT", "is my router behind CGNAT", "ssh into my home router", "the
+  tunnel is up but the port is dead", "port forwarding to a router web UI",
+  "several independent ways into a router", "my ISP blocks the wireguard to my
+  hub". Not for exposing services to the public internet — everything here stays
+  on loopback and is reached through SSH. Not for the household's VPN itself —
+  that is `openwrt-vpn-client`.
 ---
 
 # Reaching a router that has no public address
@@ -41,6 +45,24 @@ whether these paths go through the tunnel or beside it — see §6.
 | `<VPS>` | a host with a public address |
 | `<RPORT>` | the port on `<VPS>` that will forward to the router's SSH |
 | `<HUB_IP>` / `<ROUTER_IP>` | addresses inside your WireGuard network |
+
+### Is it CGNAT, or just NAT?
+
+It decides whether a port forward on the upstream box could ever work. Ask the
+upstream gateway for its *own* external address over NAT-PMP — no login needed, and
+OpenWrt's `lua` with `nixio` (present wherever LuCI is) is enough:
+
+```sh
+lua -e '
+local n=require("nixio"); local s=n.socket("inet","dgram"); s:setopt("socket","rcvtimeo",3)
+s:sendto(string.char(0,0),"<UPSTREAM_GW>",5351); local d=s:recv(16)
+print(d and #d>=12 and ("external: "..d:byte(9).."."..d:byte(10).."."..d:byte(11).."."..d:byte(12)) or "no NAT-PMP answer")'
+```
+
+A private or `100.64.0.0/10` answer means CGNAT: the public address you see from
+outside is shared, nothing can connect in, and a DynDNS name would point at nobody.
+Without NAT-PMP, `traceroute -n` is the next best hint — a private second hop after
+your own gateway. Either way, every path below dials **out**.
 
 ---
 
@@ -107,14 +129,15 @@ Both work. The difference is one that only shows up months later:
 |---|---|---|
 | Size | 0 — it is already there | ~450 KB of overlay |
 | Restart supervision | procd | autossh (`-M 0` leans on `ServerAliveInterval` anyway) |
-| `ExitOnForwardFailure` | **not implemented** | yes |
-| Consequence | a refused forward leaves a live process with a dead tunnel — needs the watchdog in §4 | the client exits on a refused forward and is restarted cleanly |
+| `ExitOnForwardFailure` | **dropbear 2025.x (OpenWrt 25.12): `-o ExitOnForwardFailure=yes`**; older builds: not implemented — check with `dbclient -o help` | yes |
+| Consequence | with the option, a refused forward ends the client and procd restarts it; without it, a live process with a dead tunnel — needs the watchdog in §4 | the client exits on a refused forward and is restarted cleanly |
 
-**Pick `dbclient` plus the watchdog** on a small-flash router, which is the usual
-case: the watchdog is 40 lines and costs nothing. **Pick `autossh`** if you
-already have `openssh-client` on the box for another reason, or if you would
-rather spend 450 KB than run a watchdog. What you must not do is run `dbclient`
-*without* the watchdog and assume procd has you covered — see §4.
+**On OpenWrt 25.12, pick `dbclient` with `-o ExitOnForwardFailure=yes`** — it is
+already installed and now behaves like autossh where it matters. On an older dropbear,
+**`dbclient` plus the watchdog** is still the cheapest choice; **`autossh`** if you
+already have `openssh-client` on the box for another reason. What you must not do is
+run `dbclient` with neither the option nor the watchdog and assume procd has you
+covered — see §4.
 
 ### Keys, in the direction that keeps the far side safe
 
@@ -196,20 +219,32 @@ ClientAliveCountMax 3
 ```
 
 Ninety seconds to reap a dead peer, rather than the ten minutes the defaults give
-you. Reload sshd after changing it. This is not a substitute for the watchdog —
-it shortens the window, the watchdog closes it.
+you. Reload sshd after changing it. This is not a substitute for §4 — it shortens
+the window, `ExitOnForwardFailure` (or the watchdog) closes it.
+
+**A reboot hits this every time.** A router is back on the network in about 100
+seconds, its old session on `<VPS>` is still inside its 90-second grace, and the first
+reconnect is refused. With `-o ExitOnForwardFailure=yes` you see one
+`Remote TCP forward request failed` in `logread`, a respawn 15 seconds later, and a
+working tunnel; without it, the tunnel stays dead until someone notices.
 
 ---
 
-## 4. The failure that survives supervision
+## 4. The failure that survives supervision — and the option that ends it
 
-`dbclient` has no `ExitOnForwardFailure`. When the remote forward is refused it
-logs the refusal and **keeps running** as an ordinary SSH session. procd sees a
-healthy process and has nothing to respawn. The result is a tunnel that is up by
-every naive measure and dead in fact — in one documented case, for three days.
+By default, when the remote forward is refused `dbclient` logs the refusal and
+**keeps running** as an ordinary SSH session. procd sees a healthy process and has
+nothing to respawn. The result is a tunnel that is up by every naive measure and dead
+in fact — in one documented case, for three days.
 
+**On dropbear 2025.x, end it with `-o ExitOnForwardFailure=yes`** (the shipped
+[`scripts/reverse-tunnel.init`](scripts/reverse-tunnel.init) passes it). The client
+exits on a refused forward and procd's `respawn` does the rest. Verified across a cold
+reboot, which is exactly when the refusal happens (§3).
+
+On an older dropbear that rejects the option,
 [`scripts/tunnel-watchdog.sh`](scripts/tunnel-watchdog.sh), from cron every five
-minutes, closes it:
+minutes, closes it instead:
 
 ```
 */5 * * * * /usr/bin/tunnel-watchdog.sh
@@ -253,16 +288,98 @@ The alternative is to mark the management traffic so it uses WAN directly. It
 costs a rule and gives up the uniformity; on a router at someone else's house,
 where a power-cycle needs a phone call, it is often worth it.
 
+### Three channels that fail differently
+
+On a router at someone else's house, behind CGNAT, on a network that filters VPNs,
+two paths are not enough — the obvious two can share a single point of failure. This
+layout has been run on OpenWrt 25.12 with an AmneziaWG tunnel `<VPN_IF>`:
+
+| # | Channel | Carried by | Lost when |
+|---|---|---|---|
+| 1 | WireGuard spoke | **inside** `<VPN_IF>` → your hub | the VPN or the hub is down |
+| 2 | reverse SSH through the VPN | `dbclient` bound to `<VPN_IF>`'s address → `<VPS>` | the VPN or `<VPS>` is down |
+| 3 | reverse SSH over the WAN | `dbclient` on the bare WAN → `<VPS>` | `<VPS>` is down, or the network starts cutting SSH |
+
+Losing the VPN leaves channel 3; losing `<VPS>` leaves channel 1; SSH being filtered
+leaves 1 and 2.
+
+**Channel 1 — the spoke inside the VPN.** Networks that filter VPNs often cut plain
+WireGuard a moment after its handshake: a fresh handshake, a few dozen bytes received,
+nothing else. Inside the obfuscated tunnel the filter only sees that tunnel. One host
+route does it, because the spoke's own encrypted packets are ordinary traffic to the
+hub's endpoint:
+
+```sh
+ip route replace <HUB_ENDPOINT>/32 dev <VPN_IF>
+```
+
+It disappears whenever `<VPN_IF>` is deleted, so re-add it wherever the tunnel is
+brought up (an `ifup` hotplug script, or the tunnel's init script). Keep
+`nohostroute='1'` on the spoke, or netifd pins the endpoint back onto the WAN.
+
+**Channels 2 and 3 — two reverse tunnels to the same `<VPS>`.** Routing by destination
+cannot send two connections to one address two different ways. Routing by *source*
+can: bind the VPN-side client to `<VPN_IF>`'s own address and give that address a rule
+of its own. [`scripts/reverse-tunnel-via-vpn.sh`](scripts/reverse-tunnel-via-vpn.sh)
+re-applies the rule before every attempt and then becomes `dbclient`, so procd
+supervises it like any other tunnel:
+
+```
+ip rule add from <VPN_ADDR> lookup <T2> priority 31000
+ip route replace default dev <VPN_IF> table <T2>
+dbclient -o ExitOnForwardFailure=yes -b <VPN_ADDR> … -N -R <RPORT2>:localhost:22 root@<VPS>
+```
+
+When the VPN interface is restarted, the VPN-side tunnel comes back on its own but
+not at once — about two minutes: `dbclient` first has to notice the dead connection
+(keepalive timeout), then gets one refusal from the stale session on `<VPS>`, then
+succeeds. If that is too slow, restart its service from wherever the tunnel is brought
+up.
+
+Give the two tunnels different `<RPORT>`s and check on `<VPS>` that they arrive from
+different addresses — the WAN one from the router's own public address, the VPN one
+from the provider's exit:
+
+```sh
+ssh <VPS> 'ss -tn | grep ":22 "'
+```
+
+All three channels reach the same host key, so one `HostKeyAlias` serves them all on
+the client side.
+
+## 7. Hopping through the router to a device behind it
+
+A tunnel into the router is also a way to anything the router can reach — a second
+router on a cable, a NAS. The obvious chain fails:
+
+```sh
+ssh -J <VPS>,root@localhost:<RPORT> root@<DEVICE_IP>
+# Host key verification failed.
+```
+
+The middle hop is `[localhost]:<RPORT>` to SSH, and `known_hosts` has no such entry —
+`HostKeyAlias` cannot be given per hop inside `-J`. Spell the hops out instead:
+
+```sh
+ssh -o ProxyCommand="ssh -o HostKeyAlias=router-tunnel -J <VPS> -p <RPORT> -W %h:%p root@localhost" \
+    -o HostKeyAlias=<DEVICE_ALIAS> root@<DEVICE_IP>
+```
+
+The router only needs dropbear's default TCP forwarding; nothing runs on it.
+
 ## Checklist
 
 ```
+[ ] CGNAT or not: known (NAT-PMP or traceroute), so nobody plans on a port forward
 [ ] path A: wg handshake fresh, firewall zone accepts input on the wg interface
 [ ] path A: nohostroute set if the router routes through a VPN
+[ ] path A: if the network cuts plain WireGuard, the hub endpoint is routed into the VPN
 [ ] path B: key on <VPS> carries restrict,port-forwarding,command="/bin/false"
 [ ] path B: /root/.ssh/known_hosts present, HOME=/root in the init script
 [ ] path B: forward bound to loopback on <VPS>, reached via ProxyJump
+[ ] path B: -o ExitOnForwardFailure=yes (dropbear 2025.x), or the watchdog on older builds
+[ ] two reverse tunnels: different ports, arriving at <VPS> from different addresses
 [ ] client config uses HostKeyAlias
 [ ] sshd on <VPS>: ClientAliveInterval 30 / CountMax 3
-[ ] watchdog installed, cron line present, stamp file fresh
-[ ] both paths tested from outside the house, on the same day
+[ ] every path tested from outside the house, on the same day — and again after a reboot
 ```

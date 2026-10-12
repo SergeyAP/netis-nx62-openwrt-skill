@@ -6,12 +6,17 @@ description: >-
   device. Covers the policy-routing model that makes it a kill switch instead of
   a leak, pinning the tunnel's own endpoints so it cannot route through itself,
   MTU, DNS, keeping your management path alive when the tunnel dies, and
-  automatic failover between provider endpoints. Trigger for: "route all traffic
-  through VPN on OpenWrt", "wireguard client on my router", "amneziawg on
+  automatic failover between provider endpoints, AmneziaWG 2.0 packages on
+  OpenWrt 25.12, and the "handshake completes but no data flows" case that turns
+  out to be a profile issued for the wrong country. Trigger for: "route all
+  traffic through VPN on OpenWrt", "wireguard client on my router", "amneziawg on
   OpenWrt", "kill switch on a router", "my VPN drops and traffic leaks", "the
   router loses internet when the tunnel goes down", "vpn endpoint failover",
-  "DPI blocks my wireguard". Not for running a VPN *server* on the router, and
-  not for site-to-site links between two of your own networks.
+  "DPI blocks my wireguard", "amneziawg handshake but no traffic", "the VPN
+  config works abroad but not in Russia". Not for sending only *some* sites
+  through the tunnel — that is `openwrt-selective-routing`, which builds on the
+  tunnel set up here. Not for running a VPN *server* on the router, and not for
+  site-to-site links between two of your own networks.
 ---
 
 # Routing an entire OpenWrt network through a VPN — without locking yourself out
@@ -30,6 +35,11 @@ a tunnel raises three problems that only appear at the router level:
 
 Everything below exists to solve those three. The order matters: build the
 routing first, prove the leak behaviour second, and only then automate failover.
+
+**Only some destinations through the tunnel?** Then you want the interface from §1
+but **not** the routing of §2 or the kill switch of §3 — the selective policy belongs
+to `openwrt-selective-routing`. Bring the tunnel up here, prove it carries data (§8),
+and continue there.
 
 **Placeholders.** Substitute your own:
 
@@ -61,6 +71,51 @@ the household's traffic, plain WireGuard for your own management spoke.
 **The obfuscation parameters must match the server exactly.** A single wrong
 value does not produce an error: the handshake simply never completes. When
 debugging AmneziaWG, verify the parameter set before suspecting keys or routing.
+
+### AmneziaWG 2.0 configs on OpenWrt 25.12
+
+A provider config is second-generation if it carries any of `HeaderProtectionKey`,
+`ContentPaddingAddition`, `S3`/`S4`, `I1`…`I5`, or ranged timers such as
+`RekeyAfterTime = 100-120`. Tools and module of the first generation do not know these
+fields. Telling generations apart and building the packages yourself are covered in
+[`references/choosing-an-amneziawg-implementation.md`](references/choosing-an-amneziawg-implementation.md)
+and [`references/building-amneziawg-from-source.md`](references/building-amneziawg-from-source.md).
+
+Before building anything, check the community releases at
+`github.com/Slava-Shchipunov/awg-openwrt`: they publish `kmod-amneziawg`,
+`amneziawg-tools` and `luci-proto-amneziawg` per OpenWrt release and target, including
+25.12 in the `apk` format. Provider instructions often still say "OpenWrt 23.05 and run
+our install script"; the script only picks those same packages for you. Installing them
+by hand keeps you out of `sh <(wget …)` as root:
+
+```sh
+ubus call system board | jsonfilter -e '@.release.version' -e '@.release.target'
+apk --print-arch                       # e.g. aarch64_cortex-a53
+# download kmod-amneziawg_v<VER>_<ARCH>_<TARGET>_<SUBTARGET>.apk and amneziawg-tools_…
+# compare each sha256 with the asset digest:
+#   gh api repos/Slava-Shchipunov/awg-openwrt/releases/tags/v<VER> --jq '.assets[] | "\(.digest) \(.name)"'
+apk add --allow-untrusted ./kmod-amneziawg_*.apk ./amneziawg-tools_*.apk   # unsigned
+```
+
+Trust the version `apk` installs, not the repository's Makefile at the same tag — the
+two have been seen to disagree.
+
+**Prove every parameter landed.** A field the tool or the proto handler does not pass
+through is simply missing, and the symptom is a tunnel that half works. Load the config
+into a throwaway interface that stays down (no handshake is sent) and compare field by
+field — values are only printed for the non-secret ones:
+
+```sh
+ip link add awgchk type amneziawg
+grep -viE '^[[:space:]]*(Address|DNS|MTU)[[:space:]]*=' <CONF> > /tmp/chk.conf
+awg setconf awgchk /tmp/chk.conf && awg showconf awgchk > /tmp/chk.rt
+for k in Jc Jmin Jmax S1 S2 S3 S4 H1 H2 H3 H4 RekeyAfterTime RejectAfterTime \
+         KeepaliveTimeout MaxHandshakeAttempts HeaderProtectionKey ContentPaddingAddition I1; do
+  f=$(sed -n "s/^$k *= *//p" <CONF> | tr -d ' '); r=$(sed -n "s/^$k *= *//Ip" /tmp/chk.rt | tr -d ' ')
+  [ "$f" = "$r" ] && echo "$k same" || echo "$k DIFFERS or MISSING"
+done
+ip link del awgchk; rm -f /tmp/chk.conf /tmp/chk.rt
+```
 
 ---
 
@@ -261,6 +316,59 @@ is how you learn the VPN died before the household does.
 
 ---
 
+## 8. The handshake completes but no data flows
+
+The pattern: `latest handshake` is fresh, `transfer` shows tens of KiB sent and a few
+hundred bytes received, and nothing — not even a ping — gets through. It is the most
+misleading failure in this skill, because everything you can see on the router looks
+fine, and the instinct is to keep tuning MTU, keys and routing. Narrow it down first:
+
+1. **Ask the far end.** If you run the server, compare its counters for your peer
+   before and after a burst of pings from the router. Received a few KB of the many you
+   sent, then nothing: the path drops the tunnel after recognising it. Received
+   everything but replies never arrive: the return path.
+2. **Run the same profile from another country.** A network namespace on any Linux
+   box elsewhere leaves that box's own networking untouched — start the userspace
+   daemon in the main namespace (so its UDP socket uses the normal route), then move
+   only the tunnel interface into the namespace:
+
+   ```sh
+   ip netns add awgtest
+   amneziawg-go -f awgt &                 # or: systemd-run --unit=awgtest … amneziawg-go -f awgt
+   awg setconf awgt <CONF_WITHOUT_ADDRESS_DNS_MTU>
+   ip link set awgt netns awgtest
+   ip -n awgtest addr add <ADDR>/32 dev awgt
+   ip -n awgtest link set lo up; ip -n awgtest link set awgt up
+   ip -n awgtest route add default dev awgt
+   ip netns exec awgtest curl -s https://ifconfig.co/country
+   # teardown: stop the daemon, ip netns del awgtest
+   ```
+
+   Static `amneziawg-go` and `awg` binaries for aarch64 run unchanged on a Raspberry Pi
+   or any arm64 Linux; the kernel module does not travel between kernels.
+3. **Read the result.** Works abroad, fails at home: neither the server nor your client
+   is broken — the home network filters this profile.
+
+**The remedy is often a profile issued for that country.** Providers that serve
+filtered networks generate region-specific configurations — a different endpoint, and
+an `I1` that makes the first packet look like a protocol common locally. Some only hand
+those out to a request coming *from* that country. If you are not there, borrow the
+router's address for the provider's web panel:
+
+```sh
+ssh -N -D 127.0.0.1:1080 root@<ROUTER>           # any of your paths to the router
+open -na "Google Chrome" --args --user-data-dir=/tmp/via-router \
+     --proxy-server="socks5://127.0.0.1:1080"      # a throwaway profile, nothing else changes
+```
+
+Nothing is installed on the router, and DNS resolves on the router's side too.
+
+What else the network may be doing — SNI filtering, a freeze after ~16 KB, plain IP
+blocks — and how far DPI-bypass tools such as zapret get against each, is in
+[`references/diagnosing-isp-blocking.md`](references/diagnosing-isp-blocking.md).
+
+---
+
 ## Verification checklist
 
 ```
@@ -282,6 +390,8 @@ is how you learn the VPN died before the household does.
 |---|---|
 | Tunnel comes up, dies within seconds | endpoint not pinned to the WAN gateway — handshake routed into itself |
 | Handshake never completes, no error | AmneziaWG parameters do not match the server, or wrong key |
+| Handshake completes, a few hundred bytes come back, then nothing | the network drops the tunnel after recognising it — test the profile from abroad, then ask for one issued in-country (§8) |
+| A second-generation config "half works" | a field was not passed through — compare `awg showconf` with the file (§1) |
 | Small packets fine, web pages hang | MTU too high; lower `<IF>` MTU, keep `mtu_fix` on WAN |
 | Traffic leaks to WAN when the tunnel dies | `lan → wan` forwarding still exists, or `route_allowed_ips='1'` put a default in `main` |
 | LAN cannot reach the internet at all | masquerade missing on the VPN zone, or `lan → <IF>` forwarding not added |

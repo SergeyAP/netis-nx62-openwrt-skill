@@ -10,12 +10,13 @@ usually cost an evening — a bootloader that only talks on certain ports, a
 tunnel that looks alive while being dead, a dashboard that draws nothing — are
 the parts these documents spend their words on.
 
-## One base skill, four optional add-ons
+## One base skill, five optional add-ons
 
 The flashing skill is the base: it turns a stock router into a blank OpenWrt.
-The other four are **independent add-ons** — pick what you need, in any
+The other five are **independent add-ons** — pick what you need, in any
 combination. None of them requires the flashing skill, and each works on any
-OpenWrt router, not only this board.
+OpenWrt router, not only this board. The one dependency between add-ons:
+selective routing needs the tunnel that the VPN skill brings up.
 
 ```
                        netis-nx62-openwrt-flash
@@ -24,22 +25,44 @@ OpenWrt router, not only this board.
         ┌─────────────────┬───────┴───────┬──────────────────┐
         ▼                 ▼               ▼                  ▼
  openwrt-remote-access  openwrt-vpn-client  openwrt-monitoring  openwrt-torrent
- reach it from away     tunnel + kill switch  metrics in Grafana   USB + Transmission
-        1.                    2.                    3.                  4.
+ reach it from away     the tunnel; all       metrics in Grafana   USB + Transmission
+                        traffic through it
+        1.                    2.  │                 4.                  5.
+                                  ▼
+                       openwrt-selective-routing
+                       only blocked services through it
+                                  3. (instead of "all traffic")
 ```
+
+### Which skill answers which question
+
+Each skill's description claims its own questions and names its neighbours for the
+rest, so they do not compete for the same request:
+
+| Question | Skill |
+|---|---|
+| "Put OpenWrt on this box", "it is bricked" | `netis-nx62-openwrt-flash` |
+| "Reach my router from outside", "is it CGNAT", "the tunnel is up but the port is dead" | `openwrt-remote-access` |
+| "All traffic through a VPN", "AmneziaWG on OpenWrt", "handshake but no traffic" | `openwrt-vpn-client` |
+| "Only blocked sites through the VPN", "Podkop", "local sites direct" | `openwrt-selective-routing` |
+| "Router metrics in Grafana", "the dashboard is empty", "metrics stopped" | `openwrt-monitoring` |
+| "Torrents on the router", "is this flash drive any good" | `openwrt-torrent` |
 
 | Skill | What it does | Add it when |
 |---|---|---|
 | [`netis-nx62-openwrt-flash`](skills/netis-nx62-openwrt-flash/) | Stock firmware → OpenWrt via U-Boot TFTP recovery, checksum-gated at every write | you have the box and want OpenWrt on it |
-| [`openwrt-remote-access`](skills/openwrt-remote-access/) | Two independent ways in from behind NAT: a WireGuard spoke and a reverse SSH tunnel, with the watchdog for the failure that survives procd | the router lives somewhere you are not |
-| [`openwrt-vpn-client`](skills/openwrt-vpn-client/) | The whole network through WireGuard/AmneziaWG: policy routing as a kill switch, endpoint pinning, DNS, automatic failover | everyone behind the router should exit through a tunnel |
+| [`openwrt-remote-access`](skills/openwrt-remote-access/) | Independent ways in from behind NAT or CGNAT: a WireGuard spoke and reverse SSH tunnels, the fix for the failure that survives procd, and a three-channel layout for routers that also run a VPN | the router lives somewhere you are not |
+| [`openwrt-vpn-client`](skills/openwrt-vpn-client/) | The tunnel itself, and the whole network through it: policy routing as a kill switch, endpoint pinning, DNS, failover, AmneziaWG 2.0 on 25.12, and what to do when the handshake completes but no data flows | everyone behind the router should exit through a tunnel — or you need the tunnel for the next row |
+| [`openwrt-selective-routing`](skills/openwrt-selective-routing/) | Only blocked services through that tunnel, with Podkop: lists, own domains, the DNS trap on phones, a test client that leaves nothing behind | blocked sites and messengers need a tunnel, everything else should stay direct and fast |
 | [`openwrt-monitoring`](skills/openwrt-monitoring/) | Router metrics into an existing Grafana — exporter choice with measured footprints, and why community dashboards render blank | you already run Prometheus/VictoriaMetrics |
 | [`openwrt-torrent`](skills/openwrt-torrent/) | Transmission on USB storage, including vetting the drive before trusting it | the router should also download things |
 
-**Suggested order: remote access → VPN → monitoring → torrents.** Access first,
-because every later change can lock you out of a box you cannot reach; monitoring
-after the VPN, because the tunnel's handshake age is the metric worth alerting
-on; storage last. Install one at a time — a problem then has exactly one
+**Suggested order: remote access → VPN → (selective routing) → monitoring →
+torrents.** Access first, because every later change can lock you out of a box you
+cannot reach; selective routing only after the tunnel carries data; monitoring after
+both, because the tunnel's handshake age is the metric worth alerting on; storage
+last. "All traffic through the VPN" and "only blocked services" are two policies for
+the same tunnel — choose one. Install one at a time — a problem then has exactly one
 candidate cause.
 
 Each skill folder holds a `SKILL.md` (the full procedure), a `GUIDE.md`
@@ -89,8 +112,14 @@ Real, field-tested lessons that trip people up (verified end-to-end on macOS):
 
 - **Remote access:** the failure nobody warns you about is not the tunnel
   dropping, it is `dbclient` surviving a *refused* forward — a live process with
-  a dead tunnel that procd happily leaves alone. The skill ships the watchdog and
-  explains the honest `dbclient` vs `autossh` trade (450 KB against 40 lines).
+  a dead tunnel that procd happily leaves alone, and it happens on every reboot.
+  dropbear 2025.x finally takes `-o ExitOnForwardFailure=yes`; the skill uses it,
+  and keeps the watchdog for older builds. For a router behind CGNAT that also
+  runs a VPN, it lays out three channels that fail for different reasons.
+- **Selective routing:** the household rarely wants *everything* abroad — banks
+  and local services break, CDNs slow down. Podkop sends only listed services
+  through the tunnel. The skill installs it by hand, explains why phones with
+  "Private DNS" silently bypass it, and tests the result from a fake LAN client.
 - **VPN client:** the kill switch is not a feature you enable, it is the absence
   of a `lan → wan` forwarding rule plus `suppress_prefixlength 0`. The skill also
   covers the mistake that makes a tunnel die seconds after coming up — an
@@ -107,8 +136,10 @@ Real, field-tested lessons that trip people up (verified end-to-end on macOS):
 ```
 skills/
 ├── netis-nx62-openwrt-flash/   SKILL.md GUIDE.md references/ scripts/backup-mtd.sh
-├── openwrt-remote-access/      SKILL.md GUIDE.md scripts/{reverse-tunnel.init,tunnel-watchdog.sh}
+├── openwrt-remote-access/      SKILL.md GUIDE.md scripts/{reverse-tunnel.init,reverse-tunnel-via-vpn.sh,tunnel-watchdog.sh}
 ├── openwrt-vpn-client/         SKILL.md GUIDE.md scripts/vpn-failover.sh
+│                               references/{choosing-an-amneziawg-implementation,building-amneziawg-from-source,diagnosing-isp-blocking}.md
+├── openwrt-selective-routing/  SKILL.md GUIDE.md scripts/test-client.sh
 ├── openwrt-monitoring/         SKILL.md GUIDE.md references/ scripts/{vmagent.init,check-dashboard.py}
 └── openwrt-torrent/            SKILL.md GUIDE.md references/ scripts/{transmission-guard.sh,usb-bench.sh,usb-capacity-check.sh}
 ```

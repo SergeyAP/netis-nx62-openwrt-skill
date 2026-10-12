@@ -6,9 +6,11 @@
 # ServerAliveInterval anyway, and procd already restarts what it supervises.
 # That saves ~450 KB (autossh pulls in openssh-client) and one moving part.
 #
-# What it does NOT buy you is OpenSSH's ExitOnForwardFailure — dropbear has no
-# equivalent, so a refused forward leaves a live process with a dead tunnel.
-# Pair this service with scripts/tunnel-watchdog.sh, or use autossh instead.
+# A refused forward must end the client, or procd keeps a live process with a dead
+# tunnel. dropbear 2025.x (OpenWrt 25.12) supports -o ExitOnForwardFailure=yes,
+# passed below. On an older dropbear that rejects the option ("dbclient -o help"
+# does not list it), delete that line and pair this service with
+# scripts/tunnel-watchdog.sh, or use autossh instead.
 #
 # HOME=/root is REQUIRED. procd starts services without it, and without HOME
 # dbclient cannot find ~/.ssh/known_hosts — it then rejects the host key
@@ -30,6 +32,7 @@ start_service() {
 	procd_open_instance
 	procd_set_param env HOME=/root
 	procd_set_param command /usr/bin/dbclient \
+		-o ExitOnForwardFailure=yes \
 		-K 30 \
 		-I 0 \
 		-i "$KEY" \

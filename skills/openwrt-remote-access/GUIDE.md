@@ -25,15 +25,20 @@ Condensed checklist. Read `SKILL.md` for the reasoning behind each item.
 4. Install `scripts/reverse-tunnel.init` as `/etc/init.d/reverse-tunnel`; keep
    `HOME=/root` in it.
 5. Tune sshd on the far host: `ClientAliveInterval 30`, `ClientAliveCountMax 3`.
-6. Install `scripts/tunnel-watchdog.sh` and its cron line — unless you chose
-   autossh, which handles that failure itself.
+6. Keep `-o ExitOnForwardFailure=yes` in the init script (dropbear 2025.x). On an
+   older dropbear that rejects it, install `scripts/tunnel-watchdog.sh` and its cron
+   line instead — or use autossh, which handles that failure itself.
 7. Add a `Host` block on your laptop with `ProxyJump` and `HostKeyAlias`.
-8. Test **both** paths from outside the network, on the same day.
+8. Test **both** paths from outside the network, on the same day — and once more
+   after a reboot, which is when a refused forward actually happens.
+9. Router also runs a VPN on a filtering network? Consider the three-channel layout
+   (SKILL.md §6): the spoke inside the VPN, one reverse tunnel beside it, one through it.
 
 ## The four things people get wrong
 
-- **Assuming procd covers it.** dbclient survives a refused forward, so the
-  process stays healthy while the tunnel is dead. Watchdog, or autossh.
+- **Assuming procd covers it.** By default dbclient survives a refused forward, so
+  the process stays healthy while the tunnel is dead. `ExitOnForwardFailure`, the
+  watchdog, or autossh.
 - **Skipping `HostKeyAlias`.** The second tunnel you build will collide with the
   first in `known_hosts`, and the error will not mention either.
 - **Forgetting `HOME=/root`** in the init script — restart loop with a host-key
